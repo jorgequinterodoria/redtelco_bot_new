@@ -3,20 +3,25 @@ FROM node:21-alpine3.18 as builder
 
 WORKDIR /app
 
+# Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 ENV PNPM_HOME=/usr/local/bin
 
+# Install build dependencies first
+RUN apk add --no-cache python3 make g++ git
+
+# Copy package files
+COPY package*.json .
+COPY pnpm-lock.yaml .
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy rest of the application
 COPY . .
 
-COPY package*.json *-lock.yaml ./
-
-RUN apk add --no-cache --virtual .gyp \
-        python3 \
-        make \
-        g++ \
-    && apk add --no-cache git \
-    && pnpm install && pnpm run build \
-    && apk del .gyp
+# Build the application
+RUN pnpm run build
 
 FROM node:21-alpine3.18 as deploy
 
@@ -33,8 +38,11 @@ COPY --from=builder /app/*.json /app/*-lock.yaml ./
 RUN corepack enable && corepack prepare pnpm@latest --activate 
 ENV PNPM_HOME=/usr/local/bin
 
-RUN npm cache clean --force && pnpm install --production --ignore-scripts \
-    && addgroup -g 1001 -S nodejs && adduser -S -u 1001 nodejs \
-    && rm -rf $PNPM_HOME/.npm $PNPM_HOME/.node-gyp
+RUN pnpm install --prod --frozen-lockfile \
+    && addgroup -g 1001 -S nodejs \
+    && adduser -S -u 1001 nodejs \
+    && chown -R nodejs:nodejs /app
 
-CMD ["npm", "start"]
+USER nodejs
+
+CMD ["pnpm", "start"]
